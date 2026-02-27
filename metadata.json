@@ -1,0 +1,5 @@
+{
+  "name": "AI Prototyper IDE",
+  "description": "A modern AI-driven web IDE for UI prototyping and React code generation with version control and direct manipulation.",
+  "requestFramePermissions": []
+}

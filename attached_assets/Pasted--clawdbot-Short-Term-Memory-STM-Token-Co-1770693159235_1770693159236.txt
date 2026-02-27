@@ -1,0 +1,64 @@
+核心思路：三层记忆架构
+参考 clawdbot，我们将记忆分为三层：
+
+短时记忆 (Short-Term Memory, STM): 当前会话的原始对话流。当 Token 达到阈值时，触发“压缩（Compaction）”生成摘要。
+持久化刷新 (Memory Flush): 在压缩前，强制 Agent 提取关键设计决策（如：配色方案、布局偏好、组件规范），存入结构化数据库。
+长时记忆 (Long-Term Memory, LTM): 通过向量化索引，跨会话检索历史代码片段、设计风格和用户习惯。
+技术架构与金山云集成
+1. 数据存储层 (Storage Layer)
+数据类型	存储服务	存储策略
+聊天记录 (Chat Logs)	金山云 RDS (PostgreSQL)	存储原始消息、Token 统计、角色等。支持全文搜索。
+代码版本 (Code Versions)	金山云 KS3 (对象存储)	存储生成的 HTML/JS/Vue 代码包。后端仅存 KS3 链接与版本元数据。
+设计 DNA (Design DNA)	金山云 RDS	存储提取出的结构化“设计约束”（如：theme_color: #1a73e8）。
+语义记忆 (Embeddings)	金山云向量数据库 (Milvus)	存储对话摘要、代码描述的向量，用于语义召回。
+2. 关键业务流程 (Key Workflows)
+A. 上下文压缩与摘要 (Context Compaction)
+触发逻辑: 当 Session Tokens > 窗口容量的 70% 时。
+操作:
+调用 LLM 将最早的 40% 对话概括为“会话快照”。
+将快照存入 RDS 并在后续请求中作为 System Prompt 的一部分传入。
+清理原始消息流以释放 Context 空间。
+B. 代码版本管理 (Code Versioning)
+关联关系: 每一轮 AI 生成的代码与 RDS 中的 MessageID 绑定。
+逻辑:
+生成: AI 生成代码 -> 上传至 KS3 buckets/prototypes/{session_id}/{version_id}/ -> RDS 记录版本。
+回滚: 用户要求“回到刚才的版本” -> 检索 RDS 获取对应 KS3 路径 -> 加载代码至上下文。
+C. 记忆刷新 (Memory Flush)
+逻辑: 在执行 Compaction 之前，Agent 必须回答：“本次会话中，用户明确表达了哪些不可遗忘的设计标准？”。
+存储: 将这些标准转化为 JSON 存入 RDS 的 UserPreferences 表，并同步到 Milvus 供以后全局检索。
+数据库模型设计 (RDS - PostgreSQL)
+sql
+-- 1. 会话表
+CREATE TABLE sessions (
+    session_id UUID PRIMARY KEY,
+    user_id VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    current_summary TEXT -- 维护最新的压缩摘要
+);
+-- 2. 消息记录表
+CREATE TABLE messages (
+    message_id UUID PRIMARY KEY,
+    session_id UUID REFERENCES sessions(session_id),
+    role VARCHAR(50), -- user / assistant / system
+    content TEXT,
+    token_count INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+-- 3. 代码版本表
+CREATE TABLE code_versions (
+    version_id UUID PRIMARY KEY,
+    session_id UUID REFERENCES sessions(session_id),
+    message_id UUID REFERENCES messages(message_id),
+    ks3_path TEXT, -- 例如: s3://my-bucket/v1.zip
+    version_tag VARCHAR(50), -- 如 "v1.2", "latest"
+    diff_from_parent TEXT -- 可选：存储与上一版本的差异
+);
+验证与后续规划
+自动化验证思路
+Token 压力测试: 模拟 100 轮对话，验证 Compaction 是否能保持 Context 不溢出且摘要不失真。
+代码回溯测试: 验证从 KS3 恢复旧版本代码并进行增量修改的连贯性。
+检索准确率: 验证 Milvus 是否能准确召回上一周讨论过的“暗黑模式”偏好。
+实现建议 (MVP 阶段)
+优先实现 RDS 记录 + KS3 存储，保证沟通和代码不丢失。
+然后引入 Compaction 逻辑 解决长对话卡顿。
+最后接入 Milvus 实现真正的“跨项目长时记忆”。
