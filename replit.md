@@ -80,9 +80,13 @@ Based on the design doc, the data layer implements:
 - This prevents Replit workflow signals from killing the processes
 
 ## Environment Variables
-- `DATABASE_URL`: PostgreSQL connection string (auto-configured)
+- `DATABASE_URL`: PostgreSQL connection string (auto-configured in Replit, must be set on external servers)
 - `GEMINI_API_KEY`: Google Gemini API key (fallback AI)
 - `BACKEND_PORT`: Backend port (default 3001)
+- `PORT`: Server port in production (default 3001)
+- `NODE_ENV`: Set to `production` for production mode
+- `DB_SSL`: Set to `true` if your database requires SSL
+- `GITHUB_TOKEN`: GitHub personal access token (for non-Replit deployments)
 
 ## Development
 - Dev server: `bash server/start.sh` (starts backend + Vite)
@@ -90,7 +94,21 @@ Based on the design doc, the data layer implements:
 - Frontend only: `npm run dev:client`
 - Build: `npm run build`
 
+## Production Deployment
+1. `npm install`
+2. `npm run build` (builds frontend to `dist/`)
+3. Set environment variables: `DATABASE_URL`, `PORT`, `NODE_ENV=production`
+4. `npm start` (runs Express serving static files + API)
+- Server auto-initializes database tables on startup
+- Listens on `0.0.0.0` in production mode
+
 ## Recent Changes
+- 2026-02-27: Production deployment support
+  - Server auto-creates database tables on startup
+  - Serves static frontend build in production mode
+  - Configurable host (0.0.0.0 in production) and port (via PORT env)
+  - GitHub integration supports direct GITHUB_TOKEN env var
+  - Optional DB_SSL support for cloud databases
 - 2026-02-26: Fixed AI model integration with GLM-4.7
   - Added `/api/ai/chat` backend proxy to avoid CORS
   - Added detailed AI request logging
