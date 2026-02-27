@@ -80,7 +80,9 @@ Based on the design doc, the data layer implements:
 - This prevents Replit workflow signals from killing the processes
 
 ## Environment Variables
-- `DATABASE_URL`: PostgreSQL connection string (auto-configured in Replit, must be set on external servers)
+- `DATABASE_URL`: PostgreSQL connection string
+  - 调试用（外网）：`postgresql://admin:Kingsoft0531@120.92.212.212:42359/postgres`
+  - 部署用（内网）：`postgresql://admin:Kingsoft0531@172.31.252.66:5432/postgres`
 - `GEMINI_API_KEY`: Google Gemini API key (fallback AI)
 - `BACKEND_PORT`: Backend port (default 3001)
 - `PORT`: Server port in production (default 3001)
