@@ -1,6 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const isProduction = process.env.NODE_ENV === 'production';
 
 let getUncachableGitHubClient;
 try {
@@ -14,11 +20,74 @@ const { Pool } = pg;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
 });
+
+async function initDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL DEFAULT '我的新项目',
+        type VARCHAR(50) NOT NULL DEFAULT 'PC',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id UUID REFERENCES projects(project_id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL DEFAULT '首页',
+        current_summary TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS messages (
+        message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id UUID REFERENCES sessions(session_id) ON DELETE CASCADE,
+        role VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        token_count INTEGER DEFAULT 0,
+        related_version_id UUID,
+        attachments JSONB DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS code_versions (
+        version_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id UUID REFERENCES sessions(session_id) ON DELETE CASCADE,
+        message_id UUID,
+        files JSONB NOT NULL,
+        entry_point VARCHAR(255) DEFAULT 'App.tsx',
+        version_tag VARCHAR(100),
+        prompt TEXT,
+        author VARCHAR(100) DEFAULT 'AI',
+        description TEXT,
+        auto_repaired BOOLEAN DEFAULT FALSE,
+        diff_from_parent TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('[DB] Tables initialized successfully');
+  } catch (err) {
+    console.error('[DB] Failed to initialize tables:', err.message);
+  } finally {
+    client.release();
+  }
+}
+
+await initDatabase();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+
+if (isProduction) {
+  const distPath = path.resolve(__dirname, '..', 'dist');
+  app.use(express.static(distPath));
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
@@ -464,6 +533,13 @@ app.post('/api/github/sync', async (req, res) => {
   }
 });
 
+if (isProduction) {
+  const distPath = path.resolve(__dirname, '..', 'dist');
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
 process.on('SIGHUP', () => {
   console.log('[Server] Received SIGHUP, ignoring...');
 });
@@ -476,7 +552,8 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Server] Unhandled rejection:', reason);
 });
 
-const PORT = parseInt(process.env.BACKEND_PORT || '3001');
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Backend server running on http://127.0.0.1:${PORT}`);
+const PORT = parseInt(process.env.PORT || process.env.BACKEND_PORT || '3001');
+const HOST = isProduction ? '0.0.0.0' : '127.0.0.1';
+app.listen(PORT, HOST, () => {
+  console.log(`Backend server running on http://${HOST}:${PORT} (${isProduction ? 'production' : 'development'})`);
 });
