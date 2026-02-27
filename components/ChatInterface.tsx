@@ -10,7 +10,7 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
-    const { state, dispatch, getCurrentPage, getCurrentProject, getCurrentVersion, selectedElement } = useApp();
+    const { state, dispatch, getCurrentPage, getCurrentProject, getCurrentVersion, selectedElement, dbActions } = useApp();
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [tab, setTab] = useState<'chat'|'prop'>('chat');
