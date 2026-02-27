@@ -27,6 +27,8 @@ async function initDatabase() {
   const client = await pool.connect();
   try {
     await client.query(`
+      CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
       CREATE TABLE IF NOT EXISTS projects (
         project_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name VARCHAR(255) NOT NULL DEFAULT '我的新项目',
@@ -467,10 +469,12 @@ app.post('/api/github/sync', async (req, res) => {
     }
 
     // Get latest commit to find base tree
+    let latestCommitSha;
     let baseTreeSha;
     try {
       const { data: ref } = await octokit.git.getRef({ owner, repo: repoName, ref: 'heads/main' });
-      const { data: commit } = await octokit.git.getCommit({ owner, repo: repoName, commit_sha: ref.object.sha });
+      latestCommitSha = ref.object.sha;
+      const { data: commit } = await octokit.git.getCommit({ owner, repo: repoName, commit_sha: latestCommitSha });
       baseTreeSha = commit.tree.sha;
     } catch (e) {
       // Branch might not exist yet
@@ -506,7 +510,7 @@ app.post('/api/github/sync', async (req, res) => {
       repo: repoName,
       message: commitMessage,
       tree: newTree.sha,
-      parents: baseTreeSha ? [baseTreeSha] : []
+      parents: latestCommitSha ? [latestCommitSha] : []
     });
 
     // Update ref
