@@ -37,10 +37,20 @@ const RUNTIME_SHELL = `
             function checkDeps() {
                 if (window.React && window.ReactDOM && window.Babel) {
                     setupListeners();
+                    setupErrorHandling();
                     log('system', '🚀 容器就绪');
                 } else {
                     setTimeout(checkDeps, 50);
                 }
+            }
+
+            function setupErrorHandling() {
+                window.onerror = function(message, source, lineno, colno, error) {
+                    errEl.textContent = '运行时错误: ' + message;
+                    errEl.style.display = 'block';
+                    log('error', message);
+                    return true;
+                };
             }
 
             function setupListeners() {
@@ -121,21 +131,32 @@ const RUNTIME_SHELL = `
                             const oldScript = document.getElementById('injected-script');
                             if (oldScript) oldScript.remove();
 
-                            const script = document.createElement('script');
-                            script.id = 'injected-script';
-                            script.innerHTML = out.code;
-                            document.body.appendChild(script);
-
-                            // 3. 使用 ReactDOM 挂载
-                            if (window.App) {
-                                if (!reactRoot) reactRoot = window.ReactDOM.createRoot(rootEl);
-                                reactRoot.render(window.React.createElement(window.App));
-                                log('system', '✅ UI 渲染完成');
-                            } else {
-                                throw new Error('代码未找到 export default 组件');
+                            // 关键修复：重置 reactRoot 以避免 React 18 的重复挂载冲突白屏
+                            if (reactRoot) {
+                                try { reactRoot.unmount(); } catch(e) {}
+                                reactRoot = null;
                             }
+                            rootEl.innerHTML = ''; // 清空遗留 DOM
+
+                            // 使用 new Function 构建隔离闭包以同步捕获顶层报错，代替动态 script 注入的异步流失
+                            try {
+                                const executeCode = new Function(out.code);
+                                executeCode();
+
+                                // 3. 使用 ReactDOM 挂载
+                                if (window.App) {
+                                    reactRoot = window.ReactDOM.createRoot(rootEl);
+                                    reactRoot.render(window.React.createElement(window.App));
+                                    log('system', '✅ UI 渲染完成');
+                                } else {
+                                    throw new Error('代码未找到 export default 组件');
+                                }
+                            } catch (execErr) {
+                                throw new Error('执行异常: ' + execErr.message);
+                            }
+                            
                         } catch (err) {
-                            errEl.textContent = '编译错误: ' + err.message;
+                            errEl.textContent = '编译/执行错误: ' + err.message;
                             errEl.style.display = 'block';
                             log('error', err.message);
                         }
@@ -158,6 +179,7 @@ export default function Workspace() {
     const [conOpen, setConOpen] = useState(false);
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const [iframeReady, setIframeReady] = useState(false);
+    const [renderTrigger, setRenderTrigger] = useState(0);
 
     const version = getCurrentVersion();
     const project = getCurrentProject();
@@ -168,12 +190,16 @@ export default function Workspace() {
         }
     }, []);
 
-    const lastVersionId = useRef<string | null>(null);
+    // 每当容器彻底初建成功或版本更新，增加触发计数器
+    useEffect(() => {
+        if (iframeReady && view === 'preview') {
+            setRenderTrigger(prev => prev + 1);
+        }
+    }, [iframeReady, view, version?.id]);
 
     useEffect(() => {
-        if (view === 'preview' && version && iframeReady && iframeRef.current?.contentWindow) {
+        if (renderTrigger > 0 && view === 'preview' && version && iframeReady && iframeRef.current?.contentWindow) {
             setLoading(true);
-
             const scripts = version.files.filter(f => ['typescript', 'javascript'].includes(f.language) || f.name.endsWith('.tsx'));
             const codeString = scripts.map(f => f.content).join('\n');
             const cssString = version.files.filter(f => f.language === 'css').map(f => f.content).join('\n');
@@ -187,7 +213,7 @@ export default function Workspace() {
             const timer = setTimeout(() => setLoading(false), 5000);
             return () => clearTimeout(timer);
         }
-    }, [version?.id, view, iframeReady]); // 依赖简化，只要 version.id 变了或刚准备好就刷
+    }, [renderTrigger]);
 
     // 监听 activePageId 改变，强制重新挂载/刷新 iframe
     useEffect(() => {
