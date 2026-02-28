@@ -21,6 +21,8 @@ const { Pool } = pg;
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+  connectionTimeoutMillis: 10000,  // 10s 连接超时
+  idleTimeoutMillis: 30000,
 });
 
 async function initDatabase() {
@@ -78,8 +80,7 @@ async function initDatabase() {
   }
 }
 
-await initDatabase();
-
+// 初始化 Express app 及中间件
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -88,6 +89,15 @@ if (isProduction) {
   const distPath = path.resolve(__dirname, '..', 'dist');
   app.use(express.static(distPath));
 }
+
+// 先启动 HTTP 服务，再异步初始化数据库（避免 DB 连接慢时阻塞服务启动）
+const PORT = parseInt(process.env.PORT || process.env.BACKEND_PORT || '3001');
+const HOST = isProduction ? '0.0.0.0' : '127.0.0.1';
+app.listen(PORT, HOST, () => {
+  console.log(`Backend server running on http://${HOST}:${PORT} (${isProduction ? 'production' : 'development'})`);
+  // 服务启动后再初始化 DB
+  initDatabase().then(() => console.log('[DB] Init complete')).catch(err => console.error('[DB] Init failed:', err.message));
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
@@ -413,7 +423,9 @@ app.get('/api/sessions/:sessionId/token-stats', async (req, res) => {
 });
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { baseUrl, apiKey, model, messages, response_format } = req.body;
+  const { baseUrl, apiKey: reqApiKey, model, messages, response_format } = req.body;
+  // 优先使用请求体中的 Key，若为空则降级到服务端环境变量（避免 Key 暴露在前端代码）
+  const apiKey = reqApiKey || process.env.KSYUN_API_KEY || '';
   console.log(`[AI] Request: model=${model}, baseUrl=${baseUrl}, messages=${messages?.length || 0}`);
   const startTime = Date.now();
   try {
@@ -537,7 +549,8 @@ app.post('/api/github/sync', async (req, res) => {
 
 if (isProduction) {
   const distPath = path.resolve(__dirname, '..', 'dist');
-  app.get('*', (_req, res) => {
+  // Express 5 不再支持 '*'，使用 '/*path' 展开匹配
+  app.get('/*path', (_req, res) => {
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
@@ -552,10 +565,4 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason) => {
   console.error('[Server] Unhandled rejection:', reason);
-});
-
-const PORT = parseInt(process.env.PORT || process.env.BACKEND_PORT || '3001');
-const HOST = isProduction ? '0.0.0.0' : '127.0.0.1';
-app.listen(PORT, HOST, () => {
-  console.log(`Backend server running on http://${HOST}:${PORT} (${isProduction ? 'production' : 'development'})`);
 });

@@ -5,118 +5,118 @@ import { X, Type, Palette, Layout, Save, ChevronRight, Hash, AlertTriangle } fro
 // --- Robust DOM to JSX Converter ---
 
 const domToJsx = (node: Node, indentLevel: number = 2): string => {
-    const indent = '  '.repeat(indentLevel);
-    
-    // 1. Handle Text Nodes
-    if (node.nodeType === Node.TEXT_NODE) {
-        let text = node.textContent || '';
-        if (!text.trim()) return '';
-        // Escape braces for JSX text to prevent syntax errors
-        text = text.replace(/\{/g, "{'{'}").replace(/\}/g, "{'}'}"); 
-        return text; 
+  const indent = '  '.repeat(indentLevel);
+
+  // 1. Handle Text Nodes
+  if (node.nodeType === Node.TEXT_NODE) {
+    let text = node.textContent || '';
+    if (!text.trim()) return '';
+    // Escape braces for JSX text to prevent syntax errors
+    text = text.replace(/\{/g, "{'{'}").replace(/\}/g, "{'}'}");
+    return text;
+  }
+
+  // 2. Handle Element Nodes
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const el = node as Element;
+    const tagName = el.tagName.toLowerCase();
+
+    // Skip internal IDE tools
+    if (el.id === 'error-overlay' || el.id === 'root') {
+      // For root, we just process children
+      return Array.from(node.childNodes).map(c => domToJsx(c, indentLevel)).join('');
     }
-    
-    // 2. Handle Element Nodes
-    if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as Element;
-        const tagName = el.tagName.toLowerCase();
-        
-        // Skip internal IDE tools
-        if (el.id === 'error-overlay' || el.id === 'root') {
-             // For root, we just process children
-             return Array.from(node.childNodes).map(c => domToJsx(c, indentLevel)).join('');
-        }
-        if (tagName === 'script' || tagName === 'style') return '';
+    if (tagName === 'script' || tagName === 'style') return '';
 
-        let propsString = '';
-        
-        // Handle Attributes
-        for (let i = 0; i < el.attributes.length; i++) {
-            const attr = el.attributes[i];
-            let name = attr.name;
-            let value = attr.value;
-            
-            // Filter internal attributes
-            if (name === 'contenteditable') continue;
-            if (name === 'data-tag-name') continue;
-            if (value.includes('element-selected')) {
-                value = value.replace('element-selected', '').trim();
-            }
-            if (!value && name === 'class') continue;
+    let propsString = '';
 
-            // Rename standard props
-            if (name === 'class') name = 'className';
-            if (name === 'for') name = 'htmlFor';
-            if (name === 'colspan') name = 'colSpan';
-            if (name === 'rowspan') name = 'rowSpan';
-            
-            // Style handling: Convert string "color: red;" to object {{ color: "red" }}
-            if (name === 'style') {
-                const styleProps = value.split(';').reduce((acc, rule) => {
-                   const [k, v] = rule.split(':');
-                   if (k && v) {
-                       const camelK = k.trim().replace(/-([a-z])/g, g => g[1].toUpperCase());
-                       acc.push(`${camelK}: "${v.trim()}"`);
-                   }
-                   return acc;
-                }, [] as string[]);
-                
-                if (styleProps.length > 0) {
-                    propsString += ` style={{ ${styleProps.join(', ')} }}`;
-                }
-                continue;
-            }
+    // Handle Attributes
+    for (let i = 0; i < el.attributes.length; i++) {
+      const attr = el.attributes[i];
+      let name = attr.name;
+      let value = attr.value;
 
-            // Normal attributes
-            propsString += ` ${name}="${value}"`;
+      // Filter internal attributes
+      if (name === 'contenteditable') continue;
+      if (name === 'data-tag-name') continue;
+      if (value.includes('element-selected')) {
+        value = value.replace('element-selected', '').trim();
+      }
+      if (!value && name === 'class') continue;
+
+      // Rename standard props
+      if (name === 'class') name = 'className';
+      if (name === 'for') name = 'htmlFor';
+      if (name === 'colspan') name = 'colSpan';
+      if (name === 'rowspan') name = 'rowSpan';
+
+      // Style handling: Convert string "color: red;" to object {{ color: "red" }}
+      if (name === 'style') {
+        const styleProps = value.split(';').reduce((acc, rule) => {
+          const [k, v] = rule.split(':');
+          if (k && v) {
+            const camelK = k.trim().replace(/-([a-z])/g, g => g[1].toUpperCase());
+            acc.push(`${camelK}: "${v.trim()}"`);
+          }
+          return acc;
+        }, [] as string[]);
+
+        if (styleProps.length > 0) {
+          propsString += ` style={{ ${styleProps.join(', ')} }}`;
         }
-        
-        // Handle Void Tags (Self-closing)
-        const voidTags = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'];
-        const isVoid = voidTags.includes(tagName);
-        
-        if (isVoid) {
-            return `\n${indent}<${tagName}${propsString} />`;
-        }
-        
-        // Handle Children
-        const children = Array.from(node.childNodes)
-            .map(c => domToJsx(c, indentLevel + 1))
-            .join('');
-            
-        // Formatting: Inline if short text, block if nested
-        const hasElementChildren = Array.from(node.childNodes).some(n => n.nodeType === Node.ELEMENT_NODE);
-        
-        if (!children.trim()) {
-             return `\n${indent}<${tagName}${propsString}></${tagName}>`;
-        }
-        
-        if (hasElementChildren) {
-             return `\n${indent}<${tagName}${propsString}>${children}\n${indent}</${tagName}>`;
-        } else {
-             return `\n${indent}<${tagName}${propsString}>${children}</${tagName}>`;
-        }
+        continue;
+      }
+
+      // Normal attributes
+      propsString += ` ${name}="${value}"`;
     }
-    
-    return '';
+
+    // Handle Void Tags (Self-closing)
+    const voidTags = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'];
+    const isVoid = voidTags.includes(tagName);
+
+    if (isVoid) {
+      return `\n${indent}<${tagName}${propsString} />`;
+    }
+
+    // Handle Children
+    const children = Array.from(node.childNodes)
+      .map(c => domToJsx(c, indentLevel + 1))
+      .join('');
+
+    // Formatting: Inline if short text, block if nested
+    const hasElementChildren = Array.from(node.childNodes).some(n => n.nodeType === Node.ELEMENT_NODE);
+
+    if (!children.trim()) {
+      return `\n${indent}<${tagName}${propsString}></${tagName}>`;
+    }
+
+    if (hasElementChildren) {
+      return `\n${indent}<${tagName}${propsString}>${children}\n${indent}</${tagName}>`;
+    } else {
+      return `\n${indent}<${tagName}${propsString}>${children}</${tagName}>`;
+    }
+  }
+
+  return '';
 };
 
 // --- Utility: Class Name Helpers ---
 
 const isBgColorClass = (c: string) => {
-    if (!c.startsWith('bg-')) return false;
-    if (c.startsWith('bg-opacity-')) return false;
-    const excluded = ['clip', 'origin', 'bottom', 'center', 'left', 'right', 'top', 'repeat', 'cover', 'contain', 'fixed', 'local', 'scroll', 'gradient', 'blend'];
-    if (excluded.some(ex => c.startsWith(`bg-${ex}`))) return false;
-    return true; 
+  if (!c.startsWith('bg-')) return false;
+  if (c.startsWith('bg-opacity-')) return false;
+  const excluded = ['clip', 'origin', 'bottom', 'center', 'left', 'right', 'top', 'repeat', 'cover', 'contain', 'fixed', 'local', 'scroll', 'gradient', 'blend'];
+  if (excluded.some(ex => c.startsWith(`bg-${ex}`))) return false;
+  return true;
 };
 
 const isTextColorClass = (c: string) => {
-    if (!c.startsWith('text-')) return false;
-    if (c.startsWith('text-opacity-')) return false;
-    const excluded = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl', '7xl', '8xl', '9xl', 'left', 'center', 'right', 'justify', 'start', 'end', 'wrap', 'nowrap', 'balance', 'pretty', 'clip', 'ellipsis', 'break', 'indent'];
-    if (excluded.some(ex => c === `text-${ex}` || c.startsWith(`text-${ex}-`))) return false;
-    return true;
+  if (!c.startsWith('text-')) return false;
+  if (c.startsWith('text-opacity-')) return false;
+  const excluded = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl', '7xl', '8xl', '9xl', 'left', 'center', 'right', 'justify', 'start', 'end', 'wrap', 'nowrap', 'balance', 'pretty', 'clip', 'ellipsis', 'break', 'indent'];
+  if (excluded.some(ex => c === `text-${ex}` || c.startsWith(`text-${ex}-`))) return false;
+  return true;
 };
 
 // --- Sub-Components ---
@@ -134,11 +134,11 @@ const HeaderSection = ({ tagName, onClose }: { tagName: string, onClose: () => v
 const ContentSection = ({ text, setText }: { text: string, setText: (s: string) => void }) => (
   <div className="space-y-2">
     <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500"><Type size={14} /> 文本内容</label>
-    <textarea 
-      value={text} 
-      onChange={(e) => setText(e.target.value)} 
-      className="w-full bg-ide-bg border border-ide-border rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[100px] resize-none shadow-inner font-mono" 
-      placeholder="输入元素文本..." 
+    <textarea
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      className="w-full bg-ide-bg border border-ide-border rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[100px] resize-none shadow-inner font-mono"
+      placeholder="输入元素文本..."
     />
   </div>
 );
@@ -146,7 +146,7 @@ const ContentSection = ({ text, setText }: { text: string, setText: (s: string) 
 const StyleSection = ({ bgColor, setBgColor, textColor, setTextColor, padding, setPadding }: any) => {
   const commonColors = ['bg-white', 'bg-gray-50', 'bg-gray-100', 'bg-blue-500', 'bg-indigo-600', 'bg-red-500', 'bg-green-500', 'bg-yellow-400'];
   const commonTextColors = ['text-gray-900', 'text-gray-600', 'text-gray-400', 'text-white', 'text-blue-600', 'text-indigo-600'];
-  
+
   return (
     <div className="space-y-5">
       <div className="space-y-3">
@@ -157,12 +157,12 @@ const StyleSection = ({ bgColor, setBgColor, textColor, setTextColor, padding, s
           ))}
         </div>
         <div className="relative">
-             <input placeholder="自定义 Tailwind 类 (如 bg-slate-800)..." value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="w-full bg-ide-bg border border-ide-border rounded-lg p-2 pl-3 text-xs text-white focus:outline-none focus:border-blue-500 font-mono" />
-             {bgColor && !bgColor.startsWith('bg-') && (
-                <span className="absolute right-3 top-2.5 text-yellow-500" title="建议使用 bg- 前缀">
-                    <AlertTriangle size={12} />
-                </span>
-             )}
+          <input placeholder="自定义 Tailwind 类 (如 bg-slate-800)..." value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="w-full bg-ide-bg border border-ide-border rounded-lg p-2 pl-3 text-xs text-white focus:outline-none focus:border-blue-500 font-mono" />
+          {bgColor && !bgColor.startsWith('bg-') && (
+            <span className="absolute right-3 top-2.5 text-yellow-500" title="建议使用 bg- 前缀">
+              <AlertTriangle size={12} />
+            </span>
+          )}
         </div>
       </div>
 
@@ -191,7 +191,7 @@ const StyleSection = ({ bgColor, setBgColor, textColor, setTextColor, padding, s
 // --- Main Component ---
 
 export default function PropertyEditor() {
-  const { selectedElement, setSelectedElement, dispatch, getCurrentPage, getCurrentVersion } = useApp();
+  const { selectedElement, setSelectedElement, dispatch, getCurrentPage, getCurrentVersion, dbActions } = useApp();
   const [text, setText] = useState('');
   const [bgColor, setBgColor] = useState('');
   const [textColor, setTextColor] = useState('');
@@ -200,28 +200,28 @@ export default function PropertyEditor() {
   useEffect(() => {
     if (selectedElement) {
       const getClasses = () => selectedElement.className.split(' ');
-      
-      const updateState = () => {
-          if (selectedElement.childNodes.length === 1 && selectedElement.childNodes[0].nodeType === 3) {
-             setText(selectedElement.textContent?.trim() || '');
-          } else if (selectedElement.childNodes.length === 0) {
-             setText(selectedElement.textContent?.trim() || '');
-          } else {
-             setText('(包含子元素 - 仅编辑样式)');
-          }
 
-          const classes = getClasses();
-          setBgColor(classes.find(c => isBgColorClass(c)) || '');
-          setTextColor(classes.find(c => isTextColorClass(c)) || '');
-          setPadding(classes.find(c => c.startsWith('p-')) || '');
+      const updateState = () => {
+        if (selectedElement.childNodes.length === 1 && selectedElement.childNodes[0].nodeType === 3) {
+          setText(selectedElement.textContent?.trim() || '');
+        } else if (selectedElement.childNodes.length === 0) {
+          setText(selectedElement.textContent?.trim() || '');
+        } else {
+          setText('(包含子元素 - 仅编辑样式)');
+        }
+
+        const classes = getClasses();
+        setBgColor(classes.find(c => isBgColorClass(c)) || '');
+        setTextColor(classes.find(c => isTextColorClass(c)) || '');
+        setPadding(classes.find(c => c.startsWith('p-')) || '');
       };
-      
+
       updateState();
 
       const inputHandler = () => {
-          if (selectedElement.childNodes.length <= 1) {
-              setText(selectedElement.textContent?.trim() || '');
-          }
+        if (selectedElement.childNodes.length <= 1) {
+          setText(selectedElement.textContent?.trim() || '');
+        }
       };
       selectedElement.addEventListener('input', inputHandler);
       return () => selectedElement.removeEventListener('input', inputHandler);
@@ -232,23 +232,23 @@ export default function PropertyEditor() {
 
   const handleUpdate = () => {
     if (!selectedElement) return;
-    
+
     // 1. Update DOM (Immediate Preview)
     if (text && text !== '(包含子元素 - 仅编辑样式)') {
-        selectedElement.textContent = text;
+      selectedElement.textContent = text;
     }
 
-    let currentClasses = selectedElement.className.split(' ').filter(c => 
-        c !== 'element-selected' && 
-        (!bgColor || !isBgColorClass(c)) &&
-        (!textColor || !isTextColorClass(c)) &&
-        (!padding || !c.startsWith('p-'))
+    let currentClasses = selectedElement.className.split(' ').filter(c =>
+      c !== 'element-selected' &&
+      (!bgColor || !isBgColorClass(c)) &&
+      (!textColor || !isTextColorClass(c)) &&
+      (!padding || !c.startsWith('p-'))
     );
-    
+
     if (bgColor) currentClasses.push(bgColor);
     if (textColor) currentClasses.push(textColor);
     if (padding) currentClasses.push(padding);
-    
+
     selectedElement.className = currentClasses.join(' ').trim();
 
     // 2. Persist to File (HTML Snapshot -> Full React Component)
@@ -256,17 +256,17 @@ export default function PropertyEditor() {
     const root = doc.getElementById('root');
     const page = getCurrentPage();
     const currentVersion = getCurrentVersion();
-    
+
     if (root && page && currentVersion) {
       // Temporarily remove selection artifacts for clean save
       const wasSelected = selectedElement.classList.contains('element-selected');
       const wasEditable = selectedElement.getAttribute('contenteditable');
       const tagNameAttr = selectedElement.getAttribute('data-tag-name');
-      
+
       selectedElement.classList.remove('element-selected');
       selectedElement.removeAttribute('contenteditable');
       selectedElement.removeAttribute('data-tag-name');
-      
+
       // Convert DOM to clean JSX
       // We pass 'root' but we actually want its children, domToJsx handles root specially
       const jsxContent = domToJsx(root);
@@ -285,44 +285,54 @@ ${jsxContent}
   );
 }
 `;
-      
+
       // Generate a new Version ID for this edit
       const newVersionId = Math.random().toString(36).substr(2, 9);
       const elementName = selectedElement.tagName.toLowerCase();
       const desc = `可视化属性编辑: <${elementName}>`;
 
-      // 1. Create New Version
-      dispatch({ 
-          type: 'UPDATE_FILE_CONTENT', 
-          payload: { 
-              pageId: page.id, 
-              fileName: currentVersion.entryPoint, 
-              content: fullFileContent,
-              newVersionId: newVersionId, // Force new ID
-              description: desc
-          } 
+      // 1. Create New Version (local state)
+      dispatch({
+        type: 'UPDATE_FILE_CONTENT',
+        payload: {
+          pageId: page.id,
+          fileName: currentVersion.entryPoint,
+          content: fullFileContent,
+          newVersionId: newVersionId,
+          description: desc
+        }
       });
-      
-      // 2. Add System Message to Chat History (To make it visible and independent)
+
+      // 2. 将新版本写入数据库，防止刷新后丢失
+      dbActions.addVersion(page.id, {
+        id: newVersionId,
+        files: [{ name: currentVersion.entryPoint, path: currentVersion.entryPoint, content: fullFileContent, language: 'typescript' }],
+        entryPoint: currentVersion.entryPoint,
+        prompt: desc,
+        description: desc,
+        author: 'User',
+      });
+
+      // 3. Add System Message to Chat History
       dispatch({
         type: 'ADD_MESSAGE',
         payload: {
-            pageId: page.id,
-            message: { 
-                id: Date.now().toString(), 
-                role: 'ai', 
-                content: `已保存属性快照: 修改了 <${elementName}> 的样式/内容。`, 
-                timestamp: Date.now(),
-                relatedVersionId: newVersionId
-            }
+          pageId: page.id,
+          message: {
+            id: Date.now().toString(),
+            role: 'ai',
+            content: `已保存属性快照: 修改了 <${elementName}> 的样式/内容。`,
+            timestamp: Date.now(),
+            relatedVersionId: newVersionId
+          }
         }
       });
-      
+
       // Restore state
       if (wasSelected) selectedElement.classList.add('element-selected');
       if (wasEditable) selectedElement.setAttribute('contenteditable', wasEditable);
       if (tagNameAttr) selectedElement.setAttribute('data-tag-name', tagNameAttr);
-      
+
       setSelectedElement(null);
       selectedElement.classList.remove('element-selected');
     }

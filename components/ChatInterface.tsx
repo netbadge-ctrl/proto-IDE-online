@@ -6,20 +6,21 @@ import { GoogleGenAI } from "@google/genai";
 import PropertyEditor from './PropertyEditor';
 
 interface ChatInterfaceProps {
-  onMinimize?: () => void;
+    onMinimize?: () => void;
 }
 
 export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
     const { state, dispatch, getCurrentPage, getCurrentProject, getCurrentVersion, selectedElement, dbActions } = useApp();
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [tab, setTab] = useState<'chat'|'prop'>('chat');
+    const [tab, setTab] = useState<'chat' | 'prop'>('chat');
     const [attached, setAttached] = useState<string[]>([]);
-    
+
     const page = getCurrentPage();
     const version = getCurrentVersion();
     const endRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const sendingRef = useRef(false); // 防重入锁，避免重复提交
 
     const SYSTEM_INSTRUCTION_GENERATOR = `你是一位世界顶级的 React 前端专家。
 当前环境：React 18, Tailwind CSS, Remix Icon (ri-)。
@@ -35,19 +36,30 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
 
     const callAI = async (promptText: string, imageParts: any[] = []) => {
         const { externalModelConfig, selectedModel } = state;
-        
+
         try {
             if (externalModelConfig.enabled && externalModelConfig.baseUrl) {
+                // 构建用户消息: 有图片时使用多模态数组格式，否则使用纯文本格式
+                const userContent = imageParts.length > 0
+                    ? [
+                        { type: 'text', text: promptText },
+                        ...imageParts.map(img => ({
+                            type: 'image_url',
+                            image_url: { url: `data:${img.mime};base64,${img.data}` }
+                        }))
+                    ]
+                    : promptText;
+
                 const response = await fetch('/api/ai/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         baseUrl: externalModelConfig.baseUrl,
-                        apiKey: externalModelConfig.apiKey,
+                        apiKey: externalModelConfig.apiKey, // 若为空则服务端会降级到环境变量
                         model: externalModelConfig.modelId,
                         messages: [
                             { role: 'system', content: SYSTEM_INSTRUCTION_GENERATOR },
-                            { role: 'user', content: promptText }
+                            { role: 'user', content: userContent }
                         ],
                         response_format: { type: "json_object" }
                     })
@@ -65,10 +77,12 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const res = await ai.models.generateContent({
                 model: selectedModel,
-                contents: [{ role: 'user', parts: [
-                    { text: promptText },
-                    ...imageParts.map(img => ({ inlineData: { mimeType: img.mime, data: img.data } }))
-                ]}],
+                contents: [{
+                    role: 'user', parts: [
+                        { text: promptText },
+                        ...imageParts.map(img => ({ inlineData: { mimeType: img.mime, data: img.data } }))
+                    ]
+                }],
                 config: {
                     systemInstruction: SYSTEM_INSTRUCTION_GENERATOR,
                     responseMimeType: "application/json"
@@ -85,23 +99,30 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
 
     const handleSend = async () => {
         if ((!input.trim() && attached.length === 0) || !page) return;
+        if (loading || sendingRef.current) return; // 防止重复提交
+        sendingRef.current = true;
         const promptText = input;
         const images = attached.map(img => ({ mime: img.split(';')[0].split(':')[1], data: img.split(',')[1] }));
         const attachedPreviews = [...attached];
         setInput(''); setAttached([]);
-        
-        dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: Date.now().toString(), role: 'user', content: promptText, attachments: attachedPreviews, timestamp: Date.now() } } });
+
+        // 1. 展示用户消息到由1 (Local State Quick Update)
+        const userMsgId = Date.now().toString();
+        dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: userMsgId, role: 'user', content: promptText, attachments: attachedPreviews, timestamp: Date.now() } } });
         setLoading(true);
+
+        // 2. 用户消息异步落库
+        dbActions.addMessage(page.id, 'user', promptText || '[图片附件]');
 
         try {
             const mainFile = version?.files.find(f => f.name.endsWith('.tsx')) || version?.files[0];
             const contextCode = mainFile?.content ? `当前代码：\n${mainFile.content}\n\n` : '';
             const fullPrompt = `${contextCode}用户需求：${promptText}\n请根据以上信息更新或生成代码。`;
-            
+
             let aiResult = await callAI(fullPrompt, images);
             aiResult = aiResult.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
             const currentData = JSON.parse(aiResult);
-            
+
             const vid = Math.random().toString(36).substr(2, 9);
             const savedVersion = await dbActions.addVersion(page.id, {
                 id: vid,
@@ -113,10 +134,21 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
                 messageId: undefined
             });
             const actualVid = savedVersion ? savedVersion.version_id : vid;
+
+            // 3. AI 回复展示到由1
             dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: Date.now().toString(), role: 'ai', content: currentData.message, timestamp: Date.now(), relatedVersionId: actualVid } } });
+
+            // 4. AI 回复异步落库
+            dbActions.addMessage(page.id, 'ai', currentData.message, actualVid);
         } catch (e: any) {
-            dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: Date.now().toString(), role: 'ai', content: `[错误] ${e.message}`, timestamp: Date.now() } } });
-        } finally { setLoading(false); }
+            const errMsg = `[错误] ${e.message}`;
+            dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: Date.now().toString(), role: 'ai', content: errMsg, timestamp: Date.now() } } });
+            // 错误消息也入库保留记录
+            dbActions.addMessage(page.id, 'ai', errMsg);
+        } finally {
+            setLoading(false);
+            sendingRef.current = false;
+        }
     };
 
     const handlePaste = (e: React.ClipboardEvent) => {
@@ -140,9 +172,9 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
             <div className="flex bg-ide-sidebar/50 border-b border-ide-border p-2 shrink-0">
                 <button onClick={() => setTab('chat')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${tab === 'chat' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}>对话</button>
                 <button onClick={() => setTab('prop')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${tab === 'prop' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}>属性</button>
-                <button onClick={onMinimize} className="p-1.5 text-gray-500 hover:text-white ml-1 transition-all"><ChevronRight size={18}/></button>
+                <button onClick={onMinimize} className="p-1.5 text-gray-500 hover:text-white ml-1 transition-all"><ChevronRight size={18} /></button>
             </div>
-            
+
             <div className="flex-1 flex flex-col overflow-hidden">
                 {tab === 'chat' ? (
                     <>
@@ -151,16 +183,16 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
                                 <div key={m.id} className={`flex flex-col gap-2 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                                     <div className={`flex gap-3 max-w-[95%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
                                         <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 shadow-md ${m.role === 'ai' ? 'bg-indigo-600' : 'bg-gray-600'}`}>
-                                            {m.role === 'ai' ? <Bot size={14} className="text-white"/> : <User size={14} className="text-white"/>}
+                                            {m.role === 'ai' ? <Bot size={14} className="text-white" /> : <User size={14} className="text-white" />}
                                         </div>
                                         <div className="flex flex-col gap-1.5 overflow-hidden">
-                                            {m.attachments?.map((img, i) => <img key={i} src={img} className="max-w-[200px] h-auto rounded-lg border border-white/10" alt=""/>)}
+                                            {m.attachments?.map((img, i) => <img key={i} src={img} className="max-w-[200px] h-auto rounded-lg border border-white/10" alt="" />)}
                                             <div className={`rounded-xl px-3 py-2 text-xs leading-relaxed break-words shadow-sm ${m.role === 'ai' ? (m.content.includes('[错误]') ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-ide-hover text-gray-200 border border-ide-border') : 'bg-blue-600 text-white'}`}>
                                                 {m.content}
                                             </div>
                                             {m.relatedVersionId && (
                                                 <button onClick={() => dispatch({ type: 'ROLLBACK_VERSION', payload: { pageId: page.id, versionId: m.relatedVersionId! } })} className="flex items-center gap-2 text-[10px] text-blue-400/80 hover:text-blue-400 transition-colors mt-1 font-bold">
-                                                    <FolderTree size={12}/> 预览此快照
+                                                    <FolderTree size={12} /> 预览此快照
                                                 </button>
                                             )}
                                         </div>
@@ -169,27 +201,27 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
                             ))}
                             {loading && (
                                 <div className="ml-10 flex items-center gap-2 text-[10px] text-blue-400 font-bold animate-pulse">
-                                    <Loader2 size={12} className="animate-spin"/> AI 正在构建高保真原型...
+                                    <Loader2 size={12} className="animate-spin" /> AI 正在构建高保真原型...
                                 </div>
                             )}
                             <div ref={endRef} />
                         </div>
-                        
+
                         <div className="p-4 border-t border-ide-border bg-ide-panel/80 backdrop-blur-md">
                             <div className="relative bg-ide-bg rounded-xl border border-ide-border focus-within:border-blue-500 transition-all overflow-hidden shadow-inner group">
-                                <textarea 
+                                <textarea
                                     ref={textareaRef}
-                                    value={input} onChange={e=>setInput(e.target.value)} 
-                                    onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&(e.preventDefault(),handleSend())} 
+                                    value={input} onChange={e => setInput(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                                     onPaste={handlePaste}
-                                    placeholder="描述您的需求（支持粘贴设计图）..." 
-                                    className="w-full bg-transparent p-3 pr-10 text-xs text-white focus:outline-none resize-none h-20 placeholder:text-gray-600" 
+                                    placeholder="描述您的需求（支持粘贴设计图）..."
+                                    className="w-full bg-transparent p-3 pr-10 text-xs text-white focus:outline-none resize-none h-20 placeholder:text-gray-600"
                                 />
                                 <div className="absolute bottom-2 right-2">
-                                    <button onClick={handleSend} disabled={loading||(!input.trim()&&attached.length===0)} className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-30 active:scale-95 transition-all shadow-lg flex items-center justify-center"><Send size={14}/></button>
+                                    <button onClick={handleSend} disabled={loading || (!input.trim() && attached.length === 0)} className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-30 active:scale-95 transition-all shadow-lg flex items-center justify-center"><Send size={14} /></button>
                                 </div>
                                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Info size={12} className="text-gray-600" title="Shift + Enter 换行"/>
+                                    <Info size={12} className="text-gray-600" title="Shift + Enter 换行" />
                                 </div>
                             </div>
                         </div>
@@ -198,7 +230,7 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
                     <div className="h-full bg-ide-panel/50 overflow-y-auto custom-scrollbar">
                         {selectedElement ? <PropertyEditor /> : (
                             <div className="h-full flex flex-col items-center justify-center p-8 opacity-30 text-center">
-                                <Settings2 size={32} className="mb-3 text-gray-400"/>
+                                <Settings2 size={32} className="mb-3 text-gray-400" />
                                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">进入选择模式以编辑组件属性</p>
                             </div>
                         )}

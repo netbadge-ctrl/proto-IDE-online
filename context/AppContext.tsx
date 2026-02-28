@@ -47,7 +47,7 @@ const createInitialProject = (name = '我的新项目', type: ProjectType = 'PC'
 const DEFAULT_EXTERNAL_CONFIG: ExternalModelConfig = {
     enabled: true,
     baseUrl: 'https://kspmas.ksyun.com/v1',
-    apiKey: '3f8615f8-7f46-4ca9-89a0-665cb8e22955',
+    apiKey: '',  // API Key 由服务端环境变量注入，不在前端硬编码
     modelId: 'glm-4.7'
 };
 
@@ -176,7 +176,7 @@ function appReducer(state: AppState, action: Action): AppState {
         projects: state.projects.map(p => p.id === projectId ? updater(p) : p)
     });
 
-    const updatePage = (projectId: string, pageId: string, updater: (pg: Page) => Page) => 
+    const updatePage = (projectId: string, pageId: string, updater: (pg: Page) => Page) =>
         updateProject(projectId, p => ({
             ...p,
             pages: p.pages.map(pg => pg.id === pageId ? updater(pg) : pg)
@@ -185,6 +185,15 @@ function appReducer(state: AppState, action: Action): AppState {
     switch (action.type) {
         case 'SET_ACTIVE_PROJECT':
             return { ...state, activeProjectId: action.payload };
+
+        case 'RENAME_PROJECT':
+            return updateProject(action.payload.projectId, p => ({ ...p, name: action.payload.name }));
+
+        case 'DELETE_PROJECT': {
+            const newProjects = state.projects.filter(p => p.id !== action.payload);
+            const nextActiveId = newProjects.length > 0 ? newProjects[0].id : '';
+            return { ...state, projects: newProjects, activeProjectId: nextActiveId };
+        }
 
         case 'CREATE_PROJECT': {
             const newProj = createInitialProject(action.payload.name, action.payload.type);
@@ -198,6 +207,17 @@ function appReducer(state: AppState, action: Action): AppState {
                 pages: [...p.pages, newPage],
                 activePageId: newPage.id
             }));
+        }
+
+        case 'RENAME_PAGE':
+            return updatePage(state.activeProjectId, action.payload.pageId, pg => ({ ...pg, name: action.payload.name }));
+
+        case 'DELETE_PAGE': {
+            return updateProject(state.activeProjectId, p => {
+                const newPages = p.pages.filter(pg => pg.id !== action.payload);
+                const nextActivePageId = newPages.length > 0 ? newPages[0].id : '';
+                return { ...p, pages: newPages, activePageId: nextActivePageId };
+            });
         }
 
         case 'ADD_VERSION': {
@@ -337,11 +357,13 @@ interface AppContextType {
     getCurrentProject: () => Project;
     getCurrentPage: () => Page | undefined;
     getCurrentVersion: () => Version | undefined;
+    selectedElement: HTMLElement | null;
+    setSelectedElement: (el: HTMLElement | null) => void;
     dbActions: {
         createProject: (name: string, type: ProjectType) => Promise<void>;
         createPage: (projectId: string, name: string) => Promise<void>;
         addMessage: (sessionId: string, role: string, content: string, relatedVersionId?: string) => Promise<DbMessage | null>;
-        addVersion: (sessionId: string, data: { files: FileEntry[]; entryPoint: string; prompt: string; description: string; messageId?: string; author?: string; autoRepaired?: boolean }) => Promise<DbVersion | null>;
+        addVersion: (sessionId: string, data: { id?: string; files: FileEntry[]; entryPoint: string; prompt: string; description: string; messageId?: string; author?: string; autoRepaired?: boolean }) => Promise<DbVersion | null>;
         loadSessionData: (sessionId: string) => Promise<void>;
         deleteProject: (projectId: string) => Promise<void>;
         deleteSession: (sessionId: string) => Promise<void>;
@@ -355,6 +377,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: PropsWithChildren<{}>) {
     const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
     const initialLoadDone = useRef(false);
+    const [selectedElement, setSelectedElement] = React.useState<HTMLElement | null>(null);
 
     const getCurrentProject = () => state.projects.find(p => p.id === state.activeProjectId) || state.projects[0];
     const getCurrentPage = () => {
@@ -444,6 +467,7 @@ export function AppProvider({ children }: PropsWithChildren<{}>) {
                 dispatch({ type: 'ADD_PAGE', payload: name });
             }
         },
+
 
         addMessage: async (sessionId: string, role: string, content: string, relatedVersionId?: string) => {
             try {
@@ -550,7 +574,7 @@ export function AppProvider({ children }: PropsWithChildren<{}>) {
     };
 
     return (
-        <AppContext.Provider value={{ state, dispatch, getCurrentProject, getCurrentPage, getCurrentVersion, dbActions }}>
+        <AppContext.Provider value={{ state, dispatch, getCurrentProject, getCurrentPage, getCurrentVersion, selectedElement, setSelectedElement, dbActions }}>
             {children}
         </AppContext.Provider>
     );

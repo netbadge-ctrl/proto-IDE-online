@@ -49,29 +49,48 @@ const RUNTIME_SHELL = `
                     visitor: {
                         ImportDeclaration(p) {
                             const s = p.node.source.value;
-                            let g = null;
-                            if (s === 'react') g = 'window.React';
-                            else if (s === 'react-dom') g = 'window.ReactDOM';
-                            else if (s === 'react-dom/client') g = 'window.ReactDOM';
+                            const specs = p.node.specifiers;
                             
-                            if (g) {
-                                const specs = p.node.specifiers;
-                                const init = t.identifier(g);
+                            // 将已知库映射到 window 全局变量
+                            let globalObj = null;
+                            if (s === 'react') globalObj = 'React';
+                            else if (s === 'react-dom' || s === 'react-dom/client') globalObj = 'ReactDOM';
+                            
+                            if (globalObj) {
+                                // 转为: const { useState } = window.React;
+                                const init = t.memberExpression(t.identifier('window'), t.identifier(globalObj));
                                 const vars = specs.map(spec => {
                                     if (t.isImportDefaultSpecifier(spec)) return t.variableDeclarator(spec.local, init);
+                                    if (t.isImportNamespaceSpecifier(spec)) return t.variableDeclarator(spec.local, init);
                                     return t.variableDeclarator(spec.local, t.memberExpression(init, spec.imported));
                                 });
                                 p.replaceWith(t.variableDeclaration('const', vars));
-                            } else { p.remove(); }
+                            } else {
+                                // 未知库(如 lucide-react)：替换为空 Proxy 而非直接删除，避免 ReferenceError
+                                if (specs.length > 0) {
+                                    const emptyObj = t.objectExpression([]);
+                                    const vars = specs.map(spec => t.variableDeclarator(spec.local, emptyObj));
+                                    p.replaceWith(t.variableDeclaration('const', vars));
+                                } else {
+                                    p.remove();
+                                }
+                            }
                         },
                         ExportDefaultDeclaration(p) {
                             const d = p.node.declaration;
-                            if (t.isFunctionDeclaration(d)) {
-                                const name = d.id ? d.id.name : '_App';
-                                p.insertBefore(d);
-                                p.replaceWith(t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.identifier('window'), t.identifier('App')), t.identifier(name))));
+                            const assign = t.expressionStatement(
+                                t.assignmentExpression('=',
+                                    t.memberExpression(t.identifier('window'), t.identifier('App')),
+                                    t.isFunctionDeclaration(d) && d.id
+                                        ? t.identifier(d.id.name)
+                                        : d
+                                )
+                            );
+                            if (t.isFunctionDeclaration(d) && d.id) {
+                                // function App() {} 先保留函数声明，再赋値给 window.App
+                                p.replaceWithMultiple([d, assign]);
                             } else {
-                                p.replaceWith(t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.identifier('window'), t.identifier('App')), d)));
+                                p.replaceWith(assign);
                             }
                         }
                     }
@@ -139,7 +158,7 @@ export default function Workspace() {
     const [conOpen, setConOpen] = useState(false);
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const [iframeReady, setIframeReady] = useState(false);
-    
+
     const version = getCurrentVersion();
     const project = getCurrentProject();
 
@@ -154,10 +173,10 @@ export default function Workspace() {
     useEffect(() => {
         if (view === 'preview' && version && iframeReady && iframeRef.current?.contentWindow) {
             if (version.id === lastVersionId.current && !loading) return;
-            
+
             setLoading(true);
             lastVersionId.current = version.id;
-            
+
             const scripts = version.files.filter(f => ['typescript', 'javascript'].includes(f.language) || f.name.endsWith('.tsx'));
             const codeString = scripts.map(f => f.content).join('\n');
             const cssString = version.files.filter(f => f.language === 'css').map(f => f.content).join('\n');
@@ -177,11 +196,11 @@ export default function Workspace() {
         const handler = (e: MessageEvent) => {
             if (e.data.type === 'LOG') {
                 dispatch({ type: 'ADD_LOG', payload: { ...e.data, timestamp: Date.now() } });
-                
+
                 if (e.data.message === '🚀 容器就绪') {
                     setIframeReady(true);
                 }
-                
+
                 if (e.data.message === '✅ UI 渲染完成') {
                     setLoading(false);
                 }
@@ -219,23 +238,23 @@ export default function Workspace() {
     return (
         <div className="flex-1 flex flex-col bg-ide-bg overflow-hidden relative">
             <div className={`absolute top-10 left-0 h-[2px] bg-blue-500 z-50 transition-all duration-300 ${loading ? 'opacity-100 w-full' : 'opacity-0 w-0'}`}></div>
-            
+
             <div className="h-10 bg-ide-sidebar border-b border-ide-border flex items-center justify-between px-4 shrink-0 z-10">
                 <div className="flex items-center gap-3">
                     <div className="flex bg-ide-bg rounded-lg p-0.5 border border-ide-border">
                         <button onClick={() => setView('preview')} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${view === 'preview' ? 'bg-ide-hover text-blue-400 border border-blue-500/20' : 'text-gray-500'}`}>预览</button>
                         <button onClick={() => setView('code')} className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${view === 'code' ? 'bg-ide-hover text-blue-400 border border-blue-500/20' : 'text-gray-500'}`}>代码</button>
                     </div>
-                    <button 
-                        onClick={() => { if(iframeRef.current) iframeRef.current.srcdoc = RUNTIME_SHELL; setIframeReady(false); }} 
+                    <button
+                        onClick={() => { if (iframeRef.current) iframeRef.current.srcdoc = RUNTIME_SHELL; setIframeReady(false); }}
                         className="p-1.5 hover:bg-ide-hover rounded text-gray-500 hover:text-blue-400"
                         title="重置容器"
                     >
-                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''}/>
+                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                     </button>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button onClick={() => setIsSelectMode(!isSelectMode)} className={`flex items-center gap-2 px-3 py-1 rounded-md text-[10px] font-bold uppercase border transition-all ${isSelectMode ? 'bg-blue-600 text-white border-blue-500' : 'text-gray-500 border-ide-border hover:bg-ide-hover'}`}><MousePointer2 size={12}/> {isSelectMode ? '选择中' : '选择模式'}</button>
+                    <button onClick={() => setIsSelectMode(!isSelectMode)} className={`flex items-center gap-2 px-3 py-1 rounded-md text-[10px] font-bold uppercase border transition-all ${isSelectMode ? 'bg-blue-600 text-white border-blue-500' : 'text-gray-500 border-ide-border hover:bg-ide-hover'}`}><MousePointer2 size={12} /> {isSelectMode ? '选择中' : '选择模式'}</button>
                     <button onClick={() => setConOpen(!conOpen)} className={`flex items-center gap-2 px-3 py-1 rounded-md text-[10px] font-bold uppercase transition-all ${state.logs.some(l => l.level === 'error') ? 'text-red-400 bg-red-500/10' : 'text-gray-500'}`}>控制台({state.logs.length})</button>
                 </div>
             </div>
@@ -248,7 +267,7 @@ export default function Workspace() {
                                 {loading && (
                                     <div className="absolute inset-0 bg-white/40 backdrop-blur-[2px] z-50 flex flex-col items-center justify-center animate-in fade-in">
                                         <div className="bg-white/90 p-5 rounded-2xl shadow-2xl flex flex-col items-center border border-gray-100">
-                                            <Loader2 size={32} className="animate-spin text-blue-500 mb-3"/>
+                                            <Loader2 size={32} className="animate-spin text-blue-500 mb-3" />
                                             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Hot Reloading...</span>
                                         </div>
                                     </div>
@@ -260,12 +279,12 @@ export default function Workspace() {
                         )}
                     </div>
                 </div>
-                
+
                 {conOpen && (
                     <div className="absolute bottom-0 left-0 right-0 h-48 bg-[#0d0e12] border-t border-ide-border flex flex-col z-[100] animate-in slide-in-from-bottom">
                         <div className="h-8 bg-ide-panel border-b border-ide-border flex items-center justify-between px-4 text-[10px] font-bold text-gray-500 uppercase">
                             <span>Output Console</span>
-                            <button onClick={() => setConOpen(false)}><X size={14}/></button>
+                            <button onClick={() => setConOpen(false)}><X size={14} /></button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] space-y-1">
                             {state.logs.map((l, i) => (
