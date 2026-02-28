@@ -186,6 +186,9 @@ function appReducer(state: AppState, action: Action): AppState {
         case 'SET_ACTIVE_PROJECT':
             return { ...state, activeProjectId: action.payload };
 
+        case 'SET_ACTIVE_PAGE':
+            return updateProject(state.activeProjectId, p => ({ ...p, activePageId: action.payload }));
+
         case 'RENAME_PROJECT':
             return updateProject(action.payload.projectId, p => ({ ...p, name: action.payload.name }));
 

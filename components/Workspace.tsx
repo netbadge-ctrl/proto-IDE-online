@@ -172,10 +172,7 @@ export default function Workspace() {
 
     useEffect(() => {
         if (view === 'preview' && version && iframeReady && iframeRef.current?.contentWindow) {
-            if (version.id === lastVersionId.current && !loading) return;
-
             setLoading(true);
-            lastVersionId.current = version.id;
 
             const scripts = version.files.filter(f => ['typescript', 'javascript'].includes(f.language) || f.name.endsWith('.tsx'));
             const codeString = scripts.map(f => f.content).join('\n');
@@ -190,7 +187,15 @@ export default function Workspace() {
             const timer = setTimeout(() => setLoading(false), 5000);
             return () => clearTimeout(timer);
         }
-    }, [version, view, project.activePageId, iframeReady]);
+    }, [version?.id, view, iframeReady]); // 依赖简化，只要 version.id 变了或刚准备好就刷
+
+    // 监听 activePageId 改变，强制重新挂载/刷新 iframe
+    useEffect(() => {
+        if (iframeRef.current) {
+            setIframeReady(false);
+            iframeRef.current.srcdoc = RUNTIME_SHELL;
+        }
+    }, [project.activePageId]);
 
     useEffect(() => {
         const handler = (e: MessageEvent) => {
