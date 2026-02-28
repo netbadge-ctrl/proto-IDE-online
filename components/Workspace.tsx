@@ -237,8 +237,11 @@ export default function Workspace() {
     }, [isSelectMode, setSelectedElement, dispatch]);
 
     useEffect(() => {
-        if (version?.files.length && !activeFile) setActiveFile(version.files.find(f => f.name.endsWith('.tsx')) || version.files[0]);
-    }, [version, activeFile]);
+        if (version?.files.length) {
+            const matchingFile = activeFile ? version.files.find(f => f.name === activeFile.name) : null;
+            setActiveFile(matchingFile || version.files.find(f => f.name.endsWith('.tsx')) || version.files[0]);
+        }
+    }, [version]);
 
     return (
         <div className="flex-1 flex flex-col bg-ide-bg overflow-hidden relative">

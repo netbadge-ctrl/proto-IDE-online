@@ -106,15 +106,13 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
         const attachedPreviews = [...attached];
         setInput(''); setAttached([]);
 
-        // 1. 展示用户消息到由1 (Local State Quick Update)
-        const userMsgId = Date.now().toString();
-        dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: userMsgId, role: 'user', content: promptText, attachments: attachedPreviews, timestamp: Date.now() } } });
+        // 1. 发起请求并展示本地“加载中”状态
         setLoading(true);
 
-        // 2. 用户消息异步落库
-        dbActions.addMessage(page.id, 'user', promptText || '[图片附件]');
-
         try {
+            // 2. 将用户消息落库，触发其响应状态树刷新
+            await dbActions.addMessage(page.id, 'user', promptText || '[图片附件]');
+
             const mainFile = version?.files.find(f => f.name.endsWith('.tsx')) || version?.files[0];
             const contextCode = mainFile?.content ? `当前代码：\n${mainFile.content}\n\n` : '';
             const fullPrompt = `${contextCode}用户需求：${promptText}\n请根据以上信息更新或生成代码。`;
@@ -135,16 +133,12 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
             });
             const actualVid = savedVersion ? savedVersion.version_id : vid;
 
-            // 3. AI 回复展示到由1
-            dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: Date.now().toString(), role: 'ai', content: currentData.message, timestamp: Date.now(), relatedVersionId: actualVid } } });
-
-            // 4. AI 回复异步落库
-            dbActions.addMessage(page.id, 'ai', currentData.message, actualVid);
+            // 3. AI 回复存入库中，UI 通过上下文刷新
+            await dbActions.addMessage(page.id, 'ai', currentData.message, actualVid);
         } catch (e: any) {
             const errMsg = `[错误] ${e.message}`;
-            dispatch({ type: 'ADD_MESSAGE', payload: { pageId: page.id, message: { id: Date.now().toString(), role: 'ai', content: errMsg, timestamp: Date.now() } } });
-            // 错误消息也入库保留记录
-            dbActions.addMessage(page.id, 'ai', errMsg);
+            // 错误消息也入库保留记录并自动触发页面重新渲染
+            await dbActions.addMessage(page.id, 'ai', errMsg);
         } finally {
             setLoading(false);
             sendingRef.current = false;
