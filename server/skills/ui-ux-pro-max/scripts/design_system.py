@@ -90,15 +90,16 @@ class DesignSystemGenerator:
         rule = self._find_reasoning_rule(category)
 
         if not rule:
+            # Fallback specifically tailored for B-Side/SaaS Dashboard products
             return {
-                "pattern": "Hero + Features + CTA",
-                "style_priority": ["Minimalism", "Flat Design"],
-                "color_mood": "Professional",
-                "typography_mood": "Clean",
-                "key_effects": "Subtle hover transitions",
-                "anti_patterns": "",
-                "decision_rules": {},
-                "severity": "MEDIUM"
+                "pattern": "Sidebar Navigation + Top Header + Data Table/Form Area",
+                "style_priority": ["Glassmorphism", "Flat Design", "Minimalism"],
+                "color_mood": "Professional, Trustworthy, High Contrast for Data",
+                "typography_mood": "Structured, Highly Legible, Data-Dense (e.g. Inter/Roboto)",
+                "key_effects": "Subtle hover transitions, Clear Active States, High-density layout",
+                "anti_patterns": "Large useless Hero images, huge fonts, low density elements, consumer-grade chaotic colors",
+                "decision_rules": {"must_have": "data-grid, unified-forms, clear-hierarchy"},
+                "severity": "HIGH"
             }
 
         # Parse decision rules JSON
@@ -347,12 +348,14 @@ def format_ascii_box(design_system: dict) -> str:
     # Pre-Delivery Checklist section
     lines.append("|  PRE-DELIVERY CHECKLIST:".ljust(BOX_WIDTH) + "|")
     checklist_items = [
+        "[ ] STRONGLY ENFORCE B-Side Dashboard Data Density",
+        "[ ] Layout MUST use Sidebar + Header + Main Content Area",
+        "[ ] Forms MUST use professional compact fields",
         "[ ] No emojis as icons (use SVG: Heroicons/Lucide)",
         "[ ] cursor-pointer on all clickable elements",
         "[ ] Hover states with smooth transitions (150-300ms)",
         "[ ] Light mode: text contrast 4.5:1 minimum",
         "[ ] Focus states visible for keyboard nav",
-        "[ ] prefers-reduced-motion respected",
         "[ ] Responsive: 375px, 768px, 1024px, 1440px"
     ]
     for item in checklist_items:
@@ -446,12 +449,14 @@ def format_markdown(design_system: dict) -> str:
 
     # Pre-Delivery Checklist section
     lines.append("### Pre-Delivery Checklist")
+    lines.append("- [ ] **STRONGLY ENFORCE B-Side Dashboard Data Density**")
+    lines.append("- [ ] **Layout MUST use Sidebar + Header + Main Content Area**")
+    lines.append("- [ ] **Forms MUST use professional compact fields**")
     lines.append("- [ ] No emojis as icons (use SVG: Heroicons/Lucide)")
     lines.append("- [ ] cursor-pointer on all clickable elements")
     lines.append("- [ ] Hover states with smooth transitions (150-300ms)")
     lines.append("- [ ] Light mode: text contrast 4.5:1 minimum")
     lines.append("- [ ] Focus states visible for keyboard nav")
-    lines.append("- [ ] prefers-reduced-motion respected")
     lines.append("- [ ] Responsive: 375px, 768px, 1024px, 1440px")
     lines.append("")
 
@@ -787,13 +792,15 @@ def format_master_md(design_system: dict) -> str:
     lines.append("")
     lines.append("Before delivering any UI code, verify:")
     lines.append("")
+    lines.append("- [ ] **STRONGLY ENFORCE B-Side Dashboard Data Density**")
+    lines.append("- [ ] **Layout MUST use Sidebar + Header + Main Content Area**")
+    lines.append("- [ ] **Forms MUST use professional compact fields**")
     lines.append("- [ ] No emojis used as icons (use SVG instead)")
     lines.append("- [ ] All icons from consistent icon set (Heroicons/Lucide)")
     lines.append("- [ ] `cursor-pointer` on all clickable elements")
     lines.append("- [ ] Hover states with smooth transitions (150-300ms)")
     lines.append("- [ ] Light mode: text contrast 4.5:1 minimum")
     lines.append("- [ ] Focus states visible for keyboard navigation")
-    lines.append("- [ ] `prefers-reduced-motion` respected")
     lines.append("- [ ] Responsive: 375px, 768px, 1024px, 1440px")
     lines.append("- [ ] No content hidden behind fixed navbars")
     lines.append("- [ ] No horizontal scroll on mobile")
