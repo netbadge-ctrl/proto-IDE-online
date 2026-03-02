@@ -113,9 +113,29 @@ export default function ChatInterface({ onMinimize }: ChatInterfaceProps) {
             // 2. 将用户消息落库，触发其响应状态树刷新
             await dbActions.addMessage(page.id, 'user', promptText || '[图片附件]');
 
+            let designSystemText = '';
+            try {
+                // 请求设计系统
+                const dsRes = await fetch('/api/design-system', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: promptText })
+                });
+                if (dsRes.ok) {
+                    const dsData = await dsRes.json();
+                    designSystemText = dsData.designSystem || '';
+                }
+            } catch (e) {
+                console.warn('[Design System] Fetch error:', e);
+            }
+
             const mainFile = version?.files.find(f => f.name.endsWith('.tsx')) || version?.files[0];
             const contextCode = mainFile?.content ? `当前代码：\n${mainFile.content}\n\n` : '';
-            const fullPrompt = `${contextCode}用户需求：${promptText}\n请根据以上信息更新或生成代码。`;
+
+            // 将分析出的 Design System 追加到上下文中，强烈要求 AI 必须遵守
+            const designSystemContext = designSystemText ? `\n\n=== 必须严格遵守的 UI/UX 设计系统规则 ===\n${designSystemText}\n========================\n\n` : '';
+
+            const fullPrompt = `${contextCode}${designSystemContext}用户需求：${promptText}\n请根据以上信息更新或生成代码。上述"设计系统"如果存在，在生成时你必须百分百严格执行它的排版、颜色、风格和约束。`;
 
             let aiResult = await callAI(fullPrompt, images);
             aiResult = aiResult.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();

@@ -14,6 +14,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# 安装 python3 及运行依赖
+RUN apk add --no-cache python3
+
 # 只复制生产所需文件
 COPY package*.json ./
 RUN npm ci --omit=dev

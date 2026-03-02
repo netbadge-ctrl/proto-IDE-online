@@ -3,6 +3,7 @@ import cors from 'cors';
 import pg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -459,6 +460,47 @@ app.post('/api/ai/chat', async (req, res) => {
     console.error(`[AI] Exception after ${elapsed}ms:`, err.message);
     res.status(502).json({ error: `AI 代理请求失败: ${err.message}` });
   }
+});
+
+app.post('/api/design-system', (req, res) => {
+  const { prompt } = req.body;
+
+  if (!prompt) {
+    return res.status(400).json({ error: 'Missing prompt for design system generation' });
+  }
+
+  console.log(`[Design System] Generating for prompt: "${prompt.substring(0, 50)}..."`);
+
+  const scriptPath = path.join(__dirname, 'skills', 'ui-ux-pro-max', 'scripts', 'search.py');
+
+  // Use spawn to execute the python script
+  const pythonProcess = spawn('python3', [
+    scriptPath,
+    prompt,
+    '--design-system',
+    '-f', 'markdown'
+  ]);
+
+  let resultData = '';
+  let errorData = '';
+
+  pythonProcess.stdout.on('data', (data) => {
+    resultData += data.toString();
+  });
+
+  pythonProcess.stderr.on('data', (data) => {
+    errorData += data.toString();
+  });
+
+  pythonProcess.on('close', (code) => {
+    if (code !== 0) {
+      console.error(`[Design System] Python script exited with code ${code}. Error: ${errorData}`);
+      return res.status(500).json({ error: 'Failed to generate design system', details: errorData });
+    }
+
+    console.log(`[Design System] Generation successful.`);
+    res.json({ designSystem: resultData.trim() });
+  });
 });
 
 app.post('/api/github/sync', async (req, res) => {
